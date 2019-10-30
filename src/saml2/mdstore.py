@@ -35,18 +35,37 @@ from saml2.validate import valid_instance
 from saml2.time_util import valid
 from saml2.validate import NotValid
 from saml2.sigver import security_context
+from saml2.extension.mdattr import NAMESPACE as NS_MDATTR
+from saml2.extension.mdattr import EntityAttributes
+from saml2.extension.mdui import NAMESPACE as NS_MDUI
+from saml2.extension.mdui import UIInfo
+from saml2.extension.mdui import DisplayName
+from saml2.extension.mdui import Description
+from saml2.extension.mdui import InformationURL
+from saml2.extension.mdui import PrivacyStatementURL
+from saml2.extension.mdui import Logo
 
-__author__ = 'rolandh'
 
 logger = logging.getLogger(__name__)
 
+classnames = {
+    "mdattr_entityattributes": "{ns}&{tag}".format(
+        ns=NS_MDATTR, tag=EntityAttributes.c_tag
+    ),
+    "mdui_uiinfo": "{ns}&{tag}".format(ns=NS_MDUI, tag=UIInfo.c_tag),
+    "mdui_uiinfo_display_name": "{ns}&{tag}".format(ns=NS_MDUI, tag=DisplayName.c_tag),
+    "mdui_uiinfo_description": "{ns}&{tag}".format(ns=NS_MDUI, tag=Description.c_tag),
+    "mdui_uiinfo_information_url": "{ns}&{tag}".format(
+        ns=NS_MDUI, tag=InformationURL.c_tag
+    ),
+    "mdui_uiinfo_privacy_statement_url": "{ns}&{tag}".format(
+        ns=NS_MDUI, tag=PrivacyStatementURL.c_tag
+    ),
+    "mdui_uiinfo_logo": "{ns}&{tag}".format(ns=NS_MDUI, tag=Logo.c_tag),
+}
 
-class ToOld(Exception):
-    pass
-
-
-class SourceNotFound(Exception):
-    pass
+ENTITY_CATEGORY = "http://macedir.org/entity-category"
+ENTITY_CATEGORY_SUPPORT = "http://macedir.org/entity-category-support"
 
 REQ2SRV = {
     # IDP
@@ -70,12 +89,14 @@ REQ2SRV = {
     "discovery_service_request": "discovery_response"
 }
 
-ENTITYATTRIBUTES = "urn:oasis:names:tc:SAML:metadata:attribute&EntityAttributes"
-ENTITY_CATEGORY = "http://macedir.org/entity-category"
-ENTITY_CATEGORY_SUPPORT = "http://macedir.org/entity-category-support"
+
+class ToOld(Exception):
+    pass
 
 
-# ---------------------------------------------------
+class SourceNotFound(Exception):
+    pass
+
 
 def load_extensions():
     from saml2 import extension
@@ -359,7 +380,7 @@ class MetaData(object):
         res = []
         if "extensions" in self[entity_id]:
             for elem in self[entity_id]["extensions"]["extension_elements"]:
-                if elem["__class__"] == ENTITYATTRIBUTES:
+                if elem["__class__"] == classnames["mdattr_entityattributes"]:
                     for attr in elem["attribute"]:
                         res.append(attr["text"])
 
@@ -471,7 +492,7 @@ class InMemoryMetaData(MetaData):
         if self.check_validity:
             try:
                 if not valid(entity_descr.valid_until):
-                    logger.error("Entity descriptor (entity id:%s) to old",
+                    logger.error("Entity descriptor (entity id:%s) too old",
                                  entity_descr.entity_id)
                     self.to_old.append(entity_descr.entity_id)
                     return
@@ -665,7 +686,8 @@ class MetaDataFile(InMemoryMetaData):
         self.cert = cert
 
     def get_metadata_content(self):
-        return open(self.filename, 'rb').read()
+        with open(self.filename, 'rb') as fp:
+            return fp.read()
 
     def load(self, *args, **kwargs):
         _txt = self.get_metadata_content()
@@ -719,7 +741,7 @@ class MetaDataLoader(MetaDataFile):
 class MetaDataExtern(InMemoryMetaData):
     """
     Class that handles metadata store somewhere on the net.
-    Accessible but HTTP GET.
+    Accessible by HTTP GET.
     """
 
     def __init__(self, attrc, url=None, security=None, cert=None,
@@ -750,7 +772,7 @@ class MetaDataExtern(InMemoryMetaData):
         """
         response = self.http.send(self.url)
         if response.status_code == 200:
-            _txt = response.text.encode("utf-8")
+            _txt = response.content
             return self.parse_and_check_signature(_txt)
         else:
             logger.info("Response status: %s", response.status_code)
@@ -768,7 +790,9 @@ class MetaDataMD(InMemoryMetaData):
         self.filename = filename
 
     def load(self, *args, **kwargs):
-        for key, item in json.loads(open(self.filename).read()):
+        with open(self.filename) as fp:
+            data = json.load(fp)
+        for key, item in data:
             self.entity[key] = item
 
 
@@ -776,7 +800,10 @@ SAML_METADATA_CONTENT_TYPE = 'application/samlmetadata+xml'
 
 
 class MetaDataMDX(InMemoryMetaData):
-    """ Uses the md protocol to fetch entity information
+    """
+    Uses the MDQ protocol to fetch entity information.
+    The protocol is defined at:
+    https://datatracker.ietf.org/doc/draft-young-md-query-saml/
     """
 
     @staticmethod
@@ -784,23 +811,40 @@ class MetaDataMDX(InMemoryMetaData):
         return "{{sha1}}{}".format(
             hashlib.sha1(entity_id.encode("utf-8")).hexdigest())
 
-    def __init__(self, url, entity_transform=None):
+    def __init__(self, url=None, security=None, cert=None,
+                 entity_transform=None, **kwargs):
         """
         :params url: mdx service url
+        :params security: SecurityContext()
+        :params cert: certificate used to check signature of signed metadata
         :params entity_transform: function transforming (e.g. base64,
         sha1 hash or URL quote
         hash) the entity id. It is applied to the entity id before it is
         concatenated with the request URL sent to the MDX server. Defaults to
         sha1 transformation.
         """
-        super(MetaDataMDX, self).__init__(None, '')
-        self.url = url
+        super(MetaDataMDX, self).__init__(None, **kwargs)
+        if not url:
+            raise SAMLError('URL for MDQ server not specified.')
+
+        self.url = url.rstrip('/')
 
         if entity_transform:
             self.entity_transform = entity_transform
         else:
-
             self.entity_transform = MetaDataMDX.sha1_entity_transform
+
+        self.cert = cert
+        self.security = security
+
+        # We assume that the MDQ server will return a single entity
+        # described by a single <EntityDescriptor> element. The protocol
+        # does allow multiple entities to be returned in an
+        # <EntitiesDescriptor> element but we will not currently support
+        # that use case since it is unlikely to be leveraged for most
+        # flows.
+        self.node_name = "%s:%s" % (md.EntityDescriptor.c_namespace,
+                                      md.EntityDescriptor.c_tag)
 
     def load(self, *args, **kwargs):
         # Do nothing
@@ -814,7 +858,7 @@ class MetaDataMDX(InMemoryMetaData):
             response = requests.get(mdx_url, headers={
                 'Accept': SAML_METADATA_CONTENT_TYPE})
             if response.status_code == 200:
-                _txt = response.text.encode("utf-8")
+                _txt = response.content
 
                 if self.parse_and_check_signature(_txt):
                     return self.entity[item]
@@ -903,8 +947,17 @@ class MetadataStore(MetaData):
             key = args[1]
             _md = MetaDataLoader(self.attrc, args[1], **_args)
         elif typ == "mdq":
-            key = args[1]
-            _md = MetaDataMDX(args[1])
+            if 'url' in kwargs:
+                key = kwargs['url']
+                url = kwargs['url']
+                cert = kwargs.get('cert')
+                security = self.security
+                entity_transform = kwargs.get('entity_transform', None)
+                _md = MetaDataMDX(url, security, cert, entity_transform)
+            else:
+                key = args[1]
+                url = args[1]
+                _md = MetaDataMDX(url)
         else:
             raise SAMLError("Unknown metadata type '%s'" % typ)
         _md.load()
@@ -1211,13 +1264,139 @@ class MetadataStore(MetaData):
         except KeyError:
             return res
         for elem in ext["extension_elements"]:
-            if elem["__class__"] == ENTITYATTRIBUTES:
+            if elem["__class__"] == classnames["mdattr_entityattributes"]:
                 for attr in elem["attribute"]:
                     if attr["name"] not in res:
                         res[attr["name"]] = []
                     res[attr["name"]] += [v["text"] for v in attr[
                         "attribute_value"]]
         return res
+
+    def _mdui_uiinfo(self, entity_id):
+        descriptor_names = (
+            item
+            for item in self[entity_id].keys()
+            if item.endswith("_descriptor")
+        )
+        descriptors = (
+            descriptor
+            for descriptor_name in descriptor_names
+            for descriptor in self[entity_id].get(descriptor_name, [])
+        )
+        extensions = (
+            extension
+            for descriptor in descriptors
+            for extension in descriptor.get("extensions", {}).get("extension_elements", [])
+        )
+        uiinfos = (
+            extension
+            for extension in extensions
+            if extension.get("__class__") == classnames["mdui_uiinfo"]
+        )
+        return uiinfos
+
+    def mdui_uiinfo(self, entity_id):
+        uiinfos = list(self._mdui_uiinfo(entity_id))
+        return uiinfos
+
+    def _mdui_uiinfo_i18n_elements(self, entity_id, langpref, element_hint, lookup):
+        uiinfos = self._mdui_uiinfo(entity_id)
+        elements = lookup(uiinfos, element_hint)
+        lang_elements = (
+            element
+            for element in elements
+            if langpref is None or element.get("lang") == langpref
+        )
+        values = (
+            value
+            for element in lang_elements
+            for value in [element.get("text")]
+        )
+        return values
+
+    def _mdui_uiinfo_lookup_elements_by_cls(self, uiinfos, element_cls):
+        elements = (
+            element
+            for uiinfo in uiinfos
+            for element_key, elements in uiinfo.items()
+            if element_key != "__class__"
+            for element in elements
+            if element.get("__class__") == element_cls
+        )
+        return elements
+
+    def _mdui_uiinfo_lookup_elements_by_key(self, uiinfos, element_key):
+        elements = (
+            element
+            for uiinfo in uiinfos
+            for elements in [uiinfo.get(element_key, [])]
+            for element in elements
+        )
+        return elements
+
+    def mdui_uiinfo_i18n_element_cls(self, entity_id, langpref, element_cls):
+        values = self._mdui_uiinfo_i18n_elements(
+            entity_id, langpref, element_cls, self._mdui_uiinfo_lookup_elements_by_cls
+        )
+        return values
+
+    def mdui_uiinfo_i18n_element_key(self, entity_id, langpref, element_key):
+        values = self._mdui_uiinfo_i18n_elements(
+            entity_id, langpref, element_key, self._mdui_uiinfo_lookup_elements_by_key
+        )
+        return values
+
+    def _mdui_uiinfo_display_name(self, entity_id, langpref=None):
+        cls = classnames["mdui_uiinfo_display_name"]
+        values = self.mdui_uiinfo_i18n_element_cls(entity_id, langpref, cls)
+        return values
+
+    def mdui_uiinfo_display_name(self, entity_id, langpref=None):
+        values = list(self._mdui_uiinfo_display_name(entity_id, langpref))
+        return values
+
+    def _mdui_uiinfo_description(self, entity_id, langpref=None):
+        cls = classnames["mdui_uiinfo_description"]
+        values = self.mdui_uiinfo_i18n_element_cls(entity_id, langpref, cls)
+        return values
+
+    def mdui_uiinfo_description(self, entity_id, langpref=None):
+        values = list(self._mdui_uiinfo_description(entity_id, langpref))
+        return values
+
+    def _mdui_uiinfo_information_url(self, entity_id, langpref=None):
+        cls = classnames["mdui_uiinfo_information_url"]
+        values = self.mdui_uiinfo_i18n_element_cls(entity_id, langpref, cls)
+        return values
+
+    def mdui_uiinfo_information_url(self, entity_id, langpref=None):
+        values = list(self._mdui_uiinfo_information_url(entity_id, langpref))
+        return values
+
+    def _mdui_uiinfo_privacy_statement_url(self, entity_id, langpref=None):
+        cls = classnames["mdui_uiinfo_privacy_statement_url"]
+        values = self.mdui_uiinfo_i18n_element_cls(entity_id, langpref, cls)
+        return values
+
+    def mdui_uiinfo_privacy_statement_url(self, entity_id, langpref=None):
+        values = list(self._mdui_uiinfo_privacy_statement_url(entity_id, langpref))
+        return values
+
+    def _mdui_uiinfo_logo(self, entity_id, width, height):
+        uiinfos = self._mdui_uiinfo(entity_id)
+        cls = classnames["mdui_uiinfo_logo"]
+        elements = self._mdui_uiinfo_lookup_elements_by_cls(uiinfos, cls)
+        values = (
+            element
+            for element in elements
+            if width is None or element.get("width") == width
+            if height is None or element.get("height") == height
+        )
+        return values
+
+    def mdui_uiinfo_logo(self, entity_id, width=None, height=None):
+        values = list(self._mdui_uiinfo_logo(entity_id, width, height))
+        return values
 
     def bindings(self, entity_id, typ, service):
         for _md in self.metadata.values():

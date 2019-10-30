@@ -7,8 +7,12 @@ to conclude its tasks.
 """
 import threading
 import six
+import time
+import logging
 
 from saml2.entity import Entity
+
+import saml2.attributemaps as attributemaps
 
 from saml2.mdstore import destinations
 from saml2.profile import paos, ecp
@@ -18,9 +22,11 @@ from saml2.samlp import NameIDMappingRequest
 from saml2.samlp import AttributeQuery
 from saml2.samlp import AuthzDecisionQuery
 from saml2.samlp import AuthnRequest
+from saml2.samlp import Extensions
+from saml2.extension import sp_type
+from saml2.extension import requested_attributes
 
 import saml2
-import time
 from saml2.soap import make_soap_enveloped_saml_thingy
 
 from six.moves.urllib.parse import parse_qs
@@ -46,7 +52,7 @@ from saml2.response import AuthnResponse
 from saml2 import BINDING_HTTP_REDIRECT
 from saml2 import BINDING_HTTP_POST
 from saml2 import BINDING_PAOS
-import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +95,7 @@ class Base(Entity):
     """ The basic pySAML2 service provider class """
 
     def __init__(self, config=None, identity_cache=None, state_cache=None,
-            virtual_organization="", config_file="", msg_cb=None):
+                 virtual_organization="", config_file="", msg_cb=None):
         """
         :param config: A saml2.config.Config instance
         :param identity_cache: Where the class should store identity information
@@ -108,17 +114,38 @@ class Base(Entity):
         else:
             self.state = state_cache
 
-        self.logout_requests_signed = False
-        self.allow_unsolicited = False
-        self.authn_requests_signed = False
-        self.want_assertions_signed = False
-        self.want_response_signed = False
-        for foo in ["allow_unsolicited", "authn_requests_signed",
-                    "logout_requests_signed", "want_assertions_signed",
-                    "want_response_signed"]:
-            v = self.config.getattr(foo, "sp")
-            if v is True or v == 'true':
-                setattr(self, foo, True)
+        attribute_defaults = {
+            "logout_requests_signed": False,
+            "allow_unsolicited": False,
+            "authn_requests_signed": False,
+            "want_assertions_signed": False,
+            "want_response_signed": True,
+            "want_assertions_or_response_signed" : False
+        }
+
+        for attr, val_default in attribute_defaults.items():
+            val_config = self.config.getattr(attr, "sp")
+            if val_config is None:
+                val = val_default
+            else:
+                val = val_config
+
+            if val == 'true':
+                val = True
+
+            setattr(self, attr, val)
+
+        if self.entity_type == "sp" and not any(
+            [
+                self.want_assertions_signed,
+                self.want_response_signed,
+                self.want_assertions_or_response_signed,
+            ]
+        ):
+            logger.warning(
+                "The SAML service provider accepts unsigned SAML Responses "
+                "and Assertions. This configuration is insecure."
+            )
 
         self.artifact2response = {}
 
@@ -227,7 +254,8 @@ class Base(Entity):
             of fulfilling the request, to create a new identifier to represent
             the principal.
         :param kwargs: Extra key word arguments
-        :return: tuple of request ID and <samlp:AuthnRequest> instance
+        :return: either a tuple of request ID and <samlp:AuthnRequest> instance
+                 or a tuple of request ID and str when sign is set to True
         """
         client_crt = None
         if "client_crt" in kwargs:
@@ -235,26 +263,30 @@ class Base(Entity):
 
         args = {}
 
-        try:
-            args["assertion_consumer_service_url"] = kwargs[
-                "assertion_consumer_service_urls"][0]
-            del kwargs["assertion_consumer_service_urls"]
-        except KeyError:
+        if self.config.getattr('hide_assertion_consumer_service', 'sp'):
+            args["assertion_consumer_service_url"] = None
+            binding = None
+        else:
             try:
                 args["assertion_consumer_service_url"] = kwargs[
-                    "assertion_consumer_service_url"]
-                del kwargs["assertion_consumer_service_url"]
+                    "assertion_consumer_service_urls"][0]
+                del kwargs["assertion_consumer_service_urls"]
             except KeyError:
                 try:
-                    args["assertion_consumer_service_index"] = str(
-                        kwargs["assertion_consumer_service_index"])
-                    del kwargs["assertion_consumer_service_index"]
+                    args["assertion_consumer_service_url"] = kwargs[
+                        "assertion_consumer_service_url"]
+                    del kwargs["assertion_consumer_service_url"]
                 except KeyError:
-                    if service_url_binding is None:
-                        service_urls = self.service_urls(binding)
-                    else:
-                        service_urls = self.service_urls(service_url_binding)
-                    args["assertion_consumer_service_url"] = service_urls[0]
+                    try:
+                        args["assertion_consumer_service_index"] = str(
+                            kwargs["assertion_consumer_service_index"])
+                        del kwargs["assertion_consumer_service_index"]
+                    except KeyError:
+                        if service_url_binding is None:
+                            service_urls = self.service_urls(binding)
+                        else:
+                            service_urls = self.service_urls(service_url_binding)
+                        args["assertion_consumer_service_url"] = service_urls[0]
 
         try:
             args["provider_name"] = kwargs["provider_name"]
@@ -304,11 +336,24 @@ class Base(Entity):
                 if nameid_format is None:
                     nameid_format = self.config.getattr("name_id_format", "sp")
 
+                    # If no nameid_format has been set in the configuration
+                    # or passed in then transient is the default.
                     if nameid_format is None:
+                        # SAML 2.0 errata says AllowCreate MUST NOT be used for
+                        # transient ids - to make a conservative change this is
+                        # only applied for the default cause
+                        allow_create = None
                         nameid_format = NAMEID_FORMAT_TRANSIENT
+
+                    # If a list has been configured or passed in choose the
+                    # first since NameIDPolicy can only have one format specified.
                     elif isinstance(nameid_format, list):
-                        # NameIDPolicy can only have one format specified
                         nameid_format = nameid_format[0]
+
+                    # Allow a deployer to signal that no format should be specified
+                    # in the NameIDPolicy by passing in or configuring the string 'None'.
+                    elif nameid_format == 'None':
+                        nameid_format = None
 
                 name_id_policy = samlp.NameIDPolicy(allow_create=allow_create,
                                                     format=nameid_format)
@@ -326,15 +371,81 @@ class Base(Entity):
         except KeyError:
             nsprefix = None
 
+        conf_sp_type = self.config.getattr('sp_type', 'sp')
+        conf_sp_type_in_md = self.config.getattr('sp_type_in_metadata', 'sp')
+        if conf_sp_type and conf_sp_type_in_md is False:
+            if not extensions:
+                extensions = Extensions()
+            item = sp_type.SPType(text=conf_sp_type)
+            extensions.add_extension_element(item)
+
+        requested_attrs = self.config.getattr('requested_attributes', 'sp')
+        if requested_attrs:
+            if not extensions:
+                extensions = Extensions()
+
+            attributemapsmods = []
+            for modname in attributemaps.__all__:
+                attributemapsmods.append(getattr(attributemaps, modname))
+
+            items = []
+            for attr in requested_attrs:
+                friendly_name = attr.get('friendly_name')
+                name = attr.get('name')
+                name_format = attr.get('name_format')
+                is_required = str(attr.get('required', False)).lower()
+
+                if not name and not friendly_name:
+                    raise ValueError(
+                        "Missing required attribute: '{}' or '{}'".format(
+                            'name', 'friendly_name'))
+
+                if not name:
+                    for mod in attributemapsmods:
+                        try:
+                            name = mod.MAP['to'][friendly_name]
+                        except KeyError:
+                            continue
+                        else:
+                            if not name_format:
+                                name_format = mod.MAP['identifier']
+                            break
+
+                if not friendly_name:
+                    for mod in attributemapsmods:
+                        try:
+                            friendly_name = mod.MAP['fro'][name]
+                        except KeyError:
+                            continue
+                        else:
+                            if not name_format:
+                                name_format = mod.MAP['identifier']
+                            break
+
+                items.append(requested_attributes.RequestedAttribute(
+                    is_required=is_required,
+                    name_format=name_format,
+                    friendly_name=friendly_name,
+                    name=name))
+
+            item = requested_attributes.RequestedAttributes(
+                extension_elements=items)
+            extensions.add_extension_element(item)
+
+        force_authn = str(
+            kwargs.pop("force_authn", None)
+            or self.config.getattr("force_authn", "sp")
+        ).lower() in ["true", "1"]
+        if force_authn:
+            kwargs["force_authn"] = "true"
+
         if kwargs:
-            _args, extensions = self._filter_args(AuthnRequest(), extensions,
-                                                  **kwargs)
+            _args, extensions = self._filter_args(
+                AuthnRequest(), extensions, **kwargs
+            )
             args.update(_args)
 
-        try:
-            del args["id"]
-        except KeyError:
-            pass
+        args.pop("id", None)
 
         if sign is None:
             sign = self.authn_requests_signed
@@ -576,50 +687,50 @@ class Base(Entity):
         :return: An response.AuthnResponse or None
         """
 
-        try:
-            _ = self.config.entityid
-        except KeyError:
+        if not getattr(self.config, 'entityid', None):
             raise SAMLError("Missing entity_id specification")
 
-        resp = None
-        if xmlstr:
-            kwargs = {
-                "outstanding_queries": outstanding,
-                "outstanding_certs": outstanding_certs,
-                "allow_unsolicited": self.allow_unsolicited,
-                "want_assertions_signed": self.want_assertions_signed,
-                "want_response_signed": self.want_response_signed,
-                "return_addrs": self.service_urls(binding=binding),
-                "entity_id": self.config.entityid,
-                "attribute_converters": self.config.attribute_converters,
-                "allow_unknown_attributes":
-                    self.config.allow_unknown_attributes,
-                'conv_info': conv_info
-            }
-            try:
-                resp = self._parse_response(xmlstr, AuthnResponse,
-                                            "assertion_consumer_service",
-                                            binding, **kwargs)
-            except StatusError as err:
-                logger.error("SAML status error: %s", err)
-                raise
-            except UnravelError:
-                return None
-            except Exception as err:
-                logger.error("XML parse error: %s", err)
-                raise
+        if not xmlstr:
+            return None
 
-            if resp is None:
-                return None
-            elif isinstance(resp, AuthnResponse):
-                if resp.assertion is not None and len(
-                        resp.response.encrypted_assertion) == 0:
-                    self.users.add_information_about_person(resp.session_info())
-                    logger.info("--- ADDED person info ----")
-                pass
-            else:
-                logger.error("Response type not supported: %s",
-                             saml2.class_name(resp))
+        kwargs = {
+            "outstanding_queries": outstanding,
+            "outstanding_certs": outstanding_certs,
+            "allow_unsolicited": self.allow_unsolicited,
+            "want_assertions_signed": self.want_assertions_signed,
+            "want_assertions_or_response_signed": self.want_assertions_or_response_signed,
+            "want_response_signed": self.want_response_signed,
+            "return_addrs": self.service_urls(binding=binding),
+            "entity_id": self.config.entityid,
+            "attribute_converters": self.config.attribute_converters,
+            "allow_unknown_attributes":
+                self.config.allow_unknown_attributes,
+            'conv_info': conv_info
+        }
+
+        try:
+            resp = self._parse_response(xmlstr, AuthnResponse,
+                                        "assertion_consumer_service",
+                                        binding, **kwargs)
+        except StatusError as err:
+            logger.error("SAML status error: %s", err)
+            raise
+        except UnravelError:
+            return None
+        except Exception as err:
+            logger.error("XML parse error: %s", err)
+            raise
+
+        if not isinstance(resp, AuthnResponse):
+            logger.error("Response type not supported: %s",
+                         saml2.class_name(resp))
+            return None
+
+        if (resp.assertion and len(resp.response.encrypted_assertion) == 0 and
+                resp.assertion.subject.name_id):
+            self.users.add_information_about_person(resp.session_info())
+            logger.info("--- ADDED person info ----")
+
         return resp
 
     # ------------------------------------------------------------------------
@@ -799,28 +910,21 @@ class Base(Entity):
         :return: A URL
         """
 
-        args = {"entityID": entity_id}
-        for key in ["policy", "returnIDParam"]:
-            try:
-                args[key] = kwargs[key]
-            except KeyError:
-                pass
+        args = {
+            "entityID": entity_id,
+            "policy": kwargs.get("policy"),
+            "returnIDParam": kwargs.get("returnIDParam"),
+            "return": kwargs.get("return_url") or kwargs.get("return"),
+            "isPassive": (
+                None
+                if "isPassive" not in kwargs.keys()
+                else "true"
+                if kwargs.get("isPassive")
+                else "false"
+            ),
+        }
 
-        try:
-            args["return"] = kwargs["return_url"]
-        except KeyError:
-            try:
-                args["return"] = kwargs["return"]
-            except KeyError:
-                pass
-
-        if "isPassive" in kwargs:
-            if kwargs["isPassive"]:
-                args["isPassive"] = "true"
-            else:
-                args["isPassive"] = "false"
-
-        params = urlencode(args)
+        params = urlencode({k: v for k, v in args.items() if v})
         return "%s?%s" % (url, params)
 
     @staticmethod

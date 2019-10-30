@@ -7,7 +7,6 @@ from saml2.mdstore import MetadataStore, name
 
 from saml2 import BINDING_HTTP_REDIRECT, BINDING_SOAP, BINDING_HTTP_POST
 from saml2.config import SPConfig, IdPConfig, Config
-from py.test import raises
 
 from saml2 import root_logger
 
@@ -68,6 +67,7 @@ sp2 = {
             },
             "authn_requests_signed": True,
             "logout_requests_signed": True,
+            "force_authn": True,
         }
     },
     #"xmlsec_binary" : "/opt/local/bin/xmlsec1",
@@ -321,7 +321,11 @@ def test_conf_syslog():
 
     # otherwise the logger setting is not changed
     root_logger.level = logging.NOTSET
-    root_logger.handlers = []
+    while root_logger.handlers:
+        handler = root_logger.handlers[-1]
+        root_logger.removeHandler(handler)
+        handler.flush()
+        handler.close()
 
     print(c.logger)
     c.setup_logger()
@@ -407,6 +411,16 @@ def test_crypto_backend():
     assert idpc.crypto_backend == 'XMLSecurity'
     sec = security_context(idpc)
     assert isinstance(sec.crypto, CryptoBackendXMLSecurity)
+
+def test_unset_force_authn():
+    cnf = SPConfig().load(sp1)
+    assert bool(cnf.getattr('force_authn', 'sp')) == False
+
+
+def test_set_force_authn():
+    cnf = SPConfig().load(sp2)
+    assert bool(cnf.getattr('force_authn', 'sp')) == True
+
 
 if __name__ == "__main__":
     test_crypto_backend()

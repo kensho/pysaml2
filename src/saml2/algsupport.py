@@ -23,7 +23,7 @@ SIGNING_METHODS = {
     "rsa-sha256": 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
     "rsa-sha384": 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha384',
     "rsa-sha512": 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512',
-    "dsa-sha1": 'http,//www.w3.org/2000/09/xmldsig#dsa-sha1',
+    "dsa-sha1": 'http://www.w3.org/2000/09/xmldsig#dsa-sha1',
     'dsa-sha256': 'http://www.w3.org/2009/xmldsig11#dsa-sha256',
     'ecdsa_sha1': 'http://www.w3.org/2001/04/xmldsig-more#ECDSA_sha1',
     'ecdsa_sha224': 'http://www.w3.org/2001/04/xmldsig-more#ECDSA_sha224',
@@ -36,10 +36,9 @@ SIGNING_METHODS = {
 def get_algorithm_support(xmlsec):
     com_list = [xmlsec, '--list-transforms']
     pof = Popen(com_list, stderr=PIPE, stdout=PIPE)
-
-    p_out = pof.stdout.read().decode('utf-8')
-    p_err = pof.stderr.read().decode('utf-8')
-    pof.wait()
+    p_out, p_err = pof.communicate()
+    p_out = p_out.decode('utf-8')
+    p_err = p_err.decode('utf-8')
 
     if not p_err:
         p = p_out.splitlines()

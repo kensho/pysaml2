@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-
 import calendar
 import logging
 import six
+
 from saml2.samlp import STATUS_VERSION_MISMATCH
 from saml2.samlp import STATUS_AUTHN_FAILED
 from saml2.samlp import STATUS_INVALID_ATTR_NAME_OR_VALUE
@@ -45,6 +45,7 @@ from saml2.saml import SCM_HOLDER_OF_KEY
 from saml2.saml import SCM_SENDER_VOUCHES
 from saml2.saml import encrypted_attribute_from_string
 from saml2.sigver import security_context
+from saml2.sigver import DecryptError
 from saml2.sigver import SignatureError
 from saml2.sigver import signed
 from saml2.attribute_converter import to_local
@@ -270,6 +271,7 @@ class StatusResponse(object):
         self.signature_check = self.sec.correctly_signed_response
         self.require_signature = False
         self.require_response_signature = False
+        self.require_signature_or_response_signature = False
         self.not_signed = False
         self.asynchop = asynchop
         self.do_not_verify = False
@@ -318,7 +320,10 @@ class StatusResponse(object):
     def _loads(self, xmldata, decode=True, origxml=None):
 
         # own copy
-        self.xmlstr = xmldata[:]
+        if isinstance(xmldata, six.binary_type):
+            self.xmlstr = xmldata[:].decode('utf-8')
+        else:
+            self.xmlstr = xmldata[:]
         logger.debug("xmlstr: %s", self.xmlstr)
         if origxml:
             self.origxml = origxml
@@ -349,26 +354,29 @@ class StatusResponse(object):
         return self._postamble()
 
     def status_ok(self):
-        if self.response.status:
-            status = self.response.status
-            logger.info("status: %s", status)
-            if status.status_code.value != samlp.STATUS_SUCCESS:
-                logger.info("Not successful operation: %s", status)
-                if status.status_code.status_code:
-                    excep = STATUSCODE2EXCEPTION[
-                        status.status_code.status_code.value]
-                else:
-                    excep = StatusError
-                if status.status_message:
-                    msg = status.status_message.text
-                else:
-                    try:
-                        msg = status.status_code.status_code.value
-                    except Exception:
-                        msg = "Unknown error"
-                raise excep(
-                    "%s from %s" % (msg, status.status_code.value,))
-        return True
+        status = self.response.status
+        logger.info("status: %s", status)
+
+        if not status or status.status_code.value == samlp.STATUS_SUCCESS:
+            return True
+
+        err_code = (
+            status.status_code.status_code.value
+            if status.status_code.status_code
+            else None
+        )
+        err_msg = (
+            status.status_message.text
+            if status.status_message
+            else err_code or "Unknown error"
+        )
+        err_cls = STATUSCODE2EXCEPTION.get(err_code, StatusError)
+
+        msg = "Unsuccessful operation: {status}\n{msg} from {code}".format(
+            status=status, msg=err_msg, code=err_code
+        )
+        logger.info(msg)
+        raise err_cls(msg)
 
     def issue_instant_ok(self):
         """ Check that the response was issued at a reasonable time """
@@ -460,7 +468,6 @@ class ManageNameIDResponse(StatusResponse):
 
 # ----------------------------------------------------------------------------
 
-
 class AuthnResponse(StatusResponse):
     """ This is where all the profile compliance is checked.
     This one does saml2int compliance. """
@@ -470,7 +477,9 @@ class AuthnResponse(StatusResponse):
             return_addrs=None, outstanding_queries=None,
             timeslack=0, asynchop=True, allow_unsolicited=False,
             test=False, allow_unknown_attributes=False,
-            want_assertions_signed=False, want_response_signed=False,
+            want_assertions_signed=False,
+            want_assertions_or_response_signed=False,
+            want_response_signed=False,
             conv_info=None, **kwargs):
 
         StatusResponse.__init__(self, sec_context, return_addrs, timeslack,
@@ -489,6 +498,7 @@ class AuthnResponse(StatusResponse):
         self.session_not_on_or_after = 0
         self.allow_unsolicited = allow_unsolicited
         self.require_signature = want_assertions_signed
+        self.require_signature_or_response_signature = want_assertions_or_response_signed
         self.require_response_signature = want_response_signed
         self.test = test
         self.allow_unknown_attributes = allow_unknown_attributes
@@ -565,11 +575,14 @@ class AuthnResponse(StatusResponse):
         # check authn_statement.session_index
 
     def condition_ok(self, lax=False):
+        if not self.assertion.conditions:
+            # Conditions is Optional for Assertion, so, if it's absent, then we
+            # assume that its valid
+            return True
+
         if self.test:
             lax = True
 
-        # The Identity Provider MUST include a <saml:Conditions> element
-        assert self.assertion.conditions
         conditions = self.assertion.conditions
 
         logger.debug("conditions: %s", conditions)
@@ -598,10 +611,9 @@ class AuthnResponse(StatusResponse):
             else:
                 self.not_on_or_after = 0
 
-        if not self.allow_unsolicited:
-            if not for_me(conditions, self.entity_id):
-                if not lax:
-                    raise Exception("Not for me!!!")
+        if not for_me(conditions, self.entity_id):
+            if not lax:
+                raise Exception("Not for me!!!")
 
         if conditions.condition:  # extra conditions
             for cond in conditions.condition:
@@ -649,7 +661,7 @@ class AuthnResponse(StatusResponse):
                         self.allow_unknown_attributes)
 
     def get_identity(self):
-        """ The assertion can contain zero or one attributeStatements
+        """ The assertion can contain zero or more attributeStatements
 
         """
         ava = {}
@@ -662,11 +674,13 @@ class AuthnResponse(StatusResponse):
                             ava.update(self.read_attribute_statement(
                                 tmp_assertion.attribute_statement[0]))
             if _assertion.attribute_statement:
-                assert len(_assertion.attribute_statement) == 1
-                _attr_statem = _assertion.attribute_statement[0]
-                ava.update(self.read_attribute_statement(_attr_statem))
+                logger.debug("Assertion contains %s attribute statement(s)",
+                             (len(self.assertion.attribute_statement)))
+                for _attr_statem in _assertion.attribute_statement:
+                    logger.debug("Attribute Statement: %s" % (_attr_statem,))
+                    ava.update(self.read_attribute_statement(_attr_statem))
             if not ava:
-                logger.error("Missing Attribute Statement")
+                logger.debug("Assertion contains no attribute statements")
         return ava
 
     def _bearer_confirmed(self, data):
@@ -707,11 +721,11 @@ class AuthnResponse(StatusResponse):
         return True
 
     def _holder_of_key_confirmed(self, data):
-        if not data:
+        if not data or not data.extension_elements:
             return False
 
         has_keyinfo = False
-        for element in extension_elements_to_elements(data,
+        for element in extension_elements_to_elements(data.extension_elements,
                                                       [samlp, saml, xenc, ds]):
             if isinstance(element, ds.KeyInfo):
                 has_keyinfo = True
@@ -882,7 +896,6 @@ class AuthnResponse(StatusResponse):
         :param resp: A saml response.
         :return: True encrypted data exists otherwise false.
         """
-        _has_encrypt_data = False
         if resp.encrypted_assertion:
             res = self.find_encrypt_data_assertion(resp.encrypted_assertion)
             if res:
@@ -907,21 +920,16 @@ class AuthnResponse(StatusResponse):
         if self.context == "AuthnQuery":
             # can contain one or more assertions
             pass
-        else:  # This is a saml2int limitation
+        else:
+            # This is a saml2int limitation
             try:
-                assert len(self.response.assertion) == 1 or \
-                       len(self.response.encrypted_assertion) == 1
+                assert (
+                    len(self.response.assertion) == 1
+                    or len(self.response.encrypted_assertion) == 1
+                    or self.assertion is not None
+                )
             except AssertionError:
                 raise Exception("No assertion part")
-
-        has_encrypted_assertions = self.find_encrypt_data(self.response)  #
-        # self.response.encrypted_assertion
-        # if not has_encrypted_assertions and self.response.assertion:
-        #    for tmp_assertion in self.response.assertion:
-        #        if tmp_assertion.advice:
-        #            if tmp_assertion.advice.encrypted_assertion:
-        #                has_encrypted_assertions = True
-        #                break
 
         if self.response.assertion:
             logger.debug("***Unencrypted assertion***")
@@ -929,33 +937,58 @@ class AuthnResponse(StatusResponse):
                 if not self._assertion(assertion, False):
                     return False
 
-        if has_encrypted_assertions:
-            _enc_assertions = []
+        if self.find_encrypt_data(self.response):
             logger.debug("***Encrypted assertion/-s***")
-            decr_text = "%s" % self.response
+            _enc_assertions = []
             resp = self.response
+            decr_text = str(self.response)
+
             decr_text_old = None
             while self.find_encrypt_data(resp) and decr_text_old != decr_text:
                 decr_text_old = decr_text
-                decr_text = self.sec.decrypt_keys(decr_text, keys)
-                resp = samlp.response_from_string(decr_text)
-            _enc_assertions = self.decrypt_assertions(resp.encrypted_assertion,
-                                                      decr_text)
+                try:
+                    decr_text = self.sec.decrypt_keys(decr_text, keys)
+                except DecryptError as e:
+                    continue
+                else:
+                    resp = samlp.response_from_string(decr_text)
+                    # check and prepare for comparison between str and unicode
+                    if type(decr_text_old) != type(decr_text):
+                        if isinstance(decr_text_old, six.binary_type):
+                            decr_text_old = decr_text_old.decode("utf-8")
+                        else:
+                            decr_text_old = decr_text_old.encode("utf-8")
+
+            _enc_assertions = self.decrypt_assertions(
+                resp.encrypted_assertion, decr_text
+            )
+
             decr_text_old = None
-            while (self.find_encrypt_data(
-                    resp) or self.find_encrypt_data_assertion_list(
-                _enc_assertions)) and \
-                            decr_text_old != decr_text:
+            while (
+                self.find_encrypt_data(resp)
+                or self.find_encrypt_data_assertion_list(_enc_assertions)
+            ) and decr_text_old != decr_text:
                 decr_text_old = decr_text
-                decr_text = self.sec.decrypt_keys(decr_text, keys)
-                resp = samlp.response_from_string(decr_text)
-                _enc_assertions = self.decrypt_assertions(
-                    resp.encrypted_assertion, decr_text, verified=True)
-            # _enc_assertions = self.decrypt_assertions(
-            # resp.encrypted_assertion, decr_text, verified=True)
+                try:
+                    decr_text = self.sec.decrypt_keys(decr_text, keys)
+                except DecryptError as e:
+                    continue
+                else:
+                    resp = samlp.response_from_string(decr_text)
+                    _enc_assertions = self.decrypt_assertions(
+                        resp.encrypted_assertion, decr_text, verified=True
+                    )
+                    # check and prepare for comparison between str and unicode
+                    if type(decr_text_old) != type(decr_text):
+                        if isinstance(decr_text_old, six.binary_type):
+                            decr_text_old = decr_text_old.decode("utf-8")
+                        else:
+                            decr_text_old = decr_text_old.encode("utf-8")
+
             all_assertions = _enc_assertions
             if resp.assertion:
                 all_assertions = all_assertions + resp.assertion
+
             if len(all_assertions) > 0:
                 for tmp_ass in all_assertions:
                     if tmp_ass.advice and tmp_ass.advice.encrypted_assertion:
@@ -970,6 +1003,7 @@ class AuthnResponse(StatusResponse):
                             tmp_ass.advice.assertion = advice_res
                         if len(advice_res) > 0:
                             tmp_ass.advice.encrypted_assertion = []
+
             self.response.assertion = resp.assertion
             for assertion in _enc_assertions:
                 if not self._assertion(assertion, True):
@@ -1078,15 +1112,13 @@ class AuthnResponse(StatusResponse):
                     "session_index": authn_statement.session_index}
 
     def __str__(self):
-        if not isinstance(self.xmlstr, six.string_types):
-            return "%s" % self.xmlstr.decode("utf-8")
-        return "%s" % self.xmlstr
+        return self.xmlstr
 
     def verify_recipient(self, recipient):
         """
         Verify that I'm the recipient of the assertion
-        
-        :param recipient: A URI specifying the entity or location to which an 
+
+        :param recipient: A URI specifying the entity or location to which an
             attesting entity can present the assertion.
         :return: True/False
         """
@@ -1268,6 +1300,14 @@ class AssertionIDResponse(object):
         self.assertion = None
         self.context = "AssertionIdResponse"
         self.signature_check = self.sec.correctly_signed_assertion_id_response
+
+        # Because this class is not a subclass of StatusResponse we need
+        # to add these attributes directly so that the _parse_response()
+        # method of the Entity class can treat instances of this class
+        # like all other responses.
+        self.require_signature = False
+        self.require_response_signature = False
+        self.require_signature_or_response_signature = False
 
     def loads(self, xmldata, decode=True, origxml=None):
         # own copy

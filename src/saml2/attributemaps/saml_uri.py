@@ -1,7 +1,11 @@
 EDUCOURSE_OID = 'urn:oid:1.3.6.1.4.1.5923.1.6.1.'
 EDUPERSON_OID = 'urn:oid:1.3.6.1.4.1.5923.1.1.1.'
 EDUMEMBER1_OID = 'urn:oid:1.3.6.1.4.1.5923.1.5.1.'
-LDAPGVAT_OID = 'urn:oid:1.2.40.0.10.2.1.1.' # ldap.gv.at definitions as specified in http://www.ref.gv.at/AG-IZ-PVP2-Version-2-1-0-2.2754.0.html
+
+# ldap.gv.at definitions as specified in:
+# http://www.ref.gv.at/AG-IZ-PVP2-Version-2-1-0-2.2754.0.html
+LDAPGVAT_OID = 'urn:oid:1.2.40.0.10.2.1.1.'
+
 UCL_DIR_PILOT = 'urn:oid:0.9.2342.19200300.100.1.'
 X500ATTR_OID = 'urn:oid:2.5.4.'
 LDAPGVAT_UCL_DIR_PILOT = UCL_DIR_PILOT
@@ -12,11 +16,43 @@ PKCS_9 = 'urn:oid:1.2.840.113549.1.9.1.'
 SCHAC = 'urn:oid:1.3.6.1.4.1.25178.1.2.'
 SIS = 'urn:oid:1.2.752.194.10.2.'
 UMICH = 'urn:oid:1.3.6.1.4.1.250.1.57.'
-OPENOSI_OID = 'urn:oid:1.3.6.1.4.1.27630.2.1.1.' #openosi-0.82.schema http://www.openosi.org/osi/display/ldap/Home
+
+# openosi-0.82.schema http://www.openosi.org/osi/display/ldap/Home
+OPENOSI_OID = 'urn:oid:1.3.6.1.4.1.27630.2.1.1.'
+
+EIDAS_NATURALPERSON = 'http://eidas.europa.eu/attributes/naturalperson/'
+EIDAS_LEGALPERSON = 'http://eidas.europa.eu/attributes/legalperson/'
+
+# SAML subject id specification
+# https://docs.oasis-open.org/security/saml-subject-id-attr/v1.0/cs01/saml-subject-id-attr-v1.0-cs01.html
+SAML_SUBJECT_ID = 'urn:oasis:names:tc:SAML:attribute:'
+
+# umbrellaID specification - https://www.umbrellaid.org
+# https://github.com/Umbrella-Commiters/UmbrellaIdP3/blob/master/schema/99-user.ldif
+UMBRELLA_EAAUser_ID = 'urn:oid:1.3.6.1.4.1.42750.1.1.'
 
 MAP = {
     'identifier': 'urn:oasis:names:tc:SAML:2.0:attrname-format:uri',
     'fro': {
+        EIDAS_LEGALPERSON+'LegalPersonIdentifier': 'LegalPersonIdentifier',
+        EIDAS_LEGALPERSON+'LegalAddress': 'LegalAddress',
+        EIDAS_LEGALPERSON+'LegalName': 'LegalName',
+        EIDAS_LEGALPERSON+'VATRegistration': 'VATRegistration',
+        EIDAS_LEGALPERSON+'TaxReference': 'TaxReference',
+        EIDAS_LEGALPERSON+'BusinessCodes': 'BusinessCodes',
+        EIDAS_LEGALPERSON+'LEI': 'LEI',
+        EIDAS_LEGALPERSON+'EORI': 'EORI',
+        EIDAS_LEGALPERSON+'SEED': 'SEED',
+        EIDAS_LEGALPERSON+'SIC': 'SIC',
+        EIDAS_LEGALPERSON+'D-2012-17-EUIdentifier': 'D-2012-17-EUIdentifier',
+        EIDAS_NATURALPERSON+'PersonIdentifier': 'PersonIdentifier',
+        EIDAS_NATURALPERSON+'CurrentFamilyName': 'FamilyName',
+        EIDAS_NATURALPERSON+'CurrentGivenName': 'FirstName',
+        EIDAS_NATURALPERSON+'DateOfBirth': 'DateOfBirth',
+        EIDAS_NATURALPERSON+'BirthName': 'BirthName',
+        EIDAS_NATURALPERSON+'PlaceOfBirth': 'PlaceOfBirth',
+        EIDAS_NATURALPERSON+'CurrentAddress': 'CurrentAddress',
+        EIDAS_NATURALPERSON+'Gender': 'Gender',
         EDUCOURSE_OID+'1': 'eduCourseOffering',
         EDUCOURSE_OID+'2': 'eduCourseMember',
         EDUMEMBER1_OID+'1': 'isMemberOf',
@@ -81,6 +117,8 @@ MAP = {
         OPENOSI_OID+'109': 'osiOtherHomePhone',
         OPENOSI_OID+'120': 'osiWorkURL',
         PKCS_9+'1': 'email',
+        SAML_SUBJECT_ID+'subject-id': 'subject-id',
+        SAML_SUBJECT_ID+'pairwise-id': 'pairwise-id',
         SCHAC+'1': 'schacMotherTongue',
         SCHAC+'2': 'schacGender',
         SCHAC+'3': 'schacDateOfBirth',
@@ -109,6 +147,8 @@ MAP = {
         UCL_DIR_PILOT+'37': 'associatedDomain',
         UCL_DIR_PILOT+'43': 'co',
         UCL_DIR_PILOT+'60': 'jpegPhoto',
+        UMBRELLA_EAAUser_ID+'1': 'EAAHash',
+        UMBRELLA_EAAUser_ID+'3': 'EAAKey',
         UMICH+'57': 'labeledURI',
         X500ATTR_OID+'2': 'knowledgeInformation',
         X500ATTR_OID+'3': 'cn',
@@ -161,6 +201,25 @@ MAP = {
         X500ATTR_OID+'65': 'pseudonym',
     },
     'to': {
+        'LegalPersonIdentifier': EIDAS_LEGALPERSON+'LegalPersonIdentifier',
+        'LegalAddress': EIDAS_LEGALPERSON+'LegalAddress',
+        'LegalName': EIDAS_LEGALPERSON+'LegalName',
+        'VATRegistration': EIDAS_LEGALPERSON+'VATRegistration',
+        'TaxReference': EIDAS_LEGALPERSON+'TaxReference',
+        'BusinessCodes': EIDAS_LEGALPERSON+'BusinessCodes',
+        'LEI': EIDAS_LEGALPERSON+'LEI',
+        'EORI': EIDAS_LEGALPERSON+'EORI',
+        'SEED': EIDAS_LEGALPERSON+'SEED',
+        'SIC': EIDAS_LEGALPERSON+'SIC',
+        'D-2012-17-EUIdentifier': EIDAS_LEGALPERSON+'D-2012-17-EUIdentifier',
+        'PersonIdentifier': EIDAS_NATURALPERSON+'PersonIdentifier',
+        'FamilyName': EIDAS_NATURALPERSON+'CurrentFamilyName',
+        'FirstName': EIDAS_NATURALPERSON+'CurrentGivenName',
+        'DateOfBirth': EIDAS_NATURALPERSON+'DateOfBirth',
+        'BirthName': EIDAS_NATURALPERSON+'BirthName',
+        'PlaceOfBirth': EIDAS_NATURALPERSON+'PlaceOfBirth',
+        'CurrentAddress': EIDAS_NATURALPERSON+'CurrentAddress',
+        'Gender': EIDAS_NATURALPERSON+'Gender',
         'associatedDomain': UCL_DIR_PILOT+'37',
         'authorityRevocationList': X500ATTR_OID+'38',
         'businessCategory': X500ATTR_OID+'15',
@@ -178,6 +237,8 @@ MAP = {
         'displayName': NETSCAPE_LDAP+'241',
         'dmdName': X500ATTR_OID+'54',
         'dnQualifier': X500ATTR_OID+'46',
+        'EAAHash': UMBRELLA_EAAUser_ID+'1',
+        'EAAKey': UMBRELLA_EAAUser_ID+'3',
         'eduCourseMember': EDUCOURSE_OID+'2',
         'eduCourseOffering': EDUCOURSE_OID+'1',
         'eduPersonAffiliation': EDUPERSON_OID+'1',
@@ -233,6 +294,7 @@ MAP = {
         'osiWorkURL': OPENOSI_OID+'120',
         'ou': X500ATTR_OID+'11',
         'owner': X500ATTR_OID+'32',
+        'pairwise-id': SAML_SUBJECT_ID+'pairwise-id',
         'physicalDeliveryOfficeName': X500ATTR_OID+'19',
         'postOfficeBox': X500ATTR_OID+'18',
         'postalAddress': X500ATTR_OID+'16',
@@ -290,6 +352,7 @@ MAP = {
         'sn': X500ATTR_OID+'4',
         'st': X500ATTR_OID+'8',
         'street': X500ATTR_OID+'9',
+        'subject-id': SAML_SUBJECT_ID+'subject-id',
         'supportedAlgorithms': X500ATTR_OID+'52',
         'supportedApplicationContext': X500ATTR_OID+'30',
         'telephoneNumber': X500ATTR_OID+'20',

@@ -4,15 +4,16 @@ import datetime
 import re
 from collections import OrderedDict
 
-from future.backports.urllib.parse import quote_plus
+from six.moves.urllib import parse
 
 from saml2.config import Config
-from saml2.mdstore import MetadataStore
+from saml2.mdstore import MetadataStore, MetaDataExtern
 from saml2.mdstore import MetaDataMDX
 from saml2.mdstore import SAML_METADATA_CONTENT_TYPE
 from saml2.mdstore import destinations
 from saml2.mdstore import name
 from saml2 import sigver
+from saml2.httpbase import HTTPBase
 from saml2 import BINDING_SOAP
 from saml2 import BINDING_HTTP_REDIRECT
 from saml2 import BINDING_HTTP_POST
@@ -298,7 +299,7 @@ def test_mdx_service():
     entity_id = "http://xenosmilus.umdc.umu.se/simplesaml/saml2/idp/metadata.php"
 
     url = "http://mdx.example.com/entities/{}".format(
-        quote_plus(MetaDataMDX.sha1_entity_transform(entity_id)))
+        parse.quote_plus(MetaDataMDX.sha1_entity_transform(entity_id)))
     responses.add(responses.GET, url, body=TEST_METADATA_STRING, status=200,
                   content_type=SAML_METADATA_CONTENT_TYPE)
 
@@ -314,7 +315,7 @@ def test_mdx_single_sign_on_service():
     entity_id = "http://xenosmilus.umdc.umu.se/simplesaml/saml2/idp/metadata.php"
 
     url = "http://mdx.example.com/entities/{}".format(
-        quote_plus(MetaDataMDX.sha1_entity_transform(entity_id)))
+        parse.quote_plus(MetaDataMDX.sha1_entity_transform(entity_id)))
     responses.add(responses.GET, url, body=TEST_METADATA_STRING, status=200,
                   content_type=SAML_METADATA_CONTENT_TYPE)
 
@@ -374,7 +375,8 @@ def test_load_extern_incommon():
 
 def test_load_local():
     # string representation of XML idp definition
-    idp_metadata = open(full_path("metadata.xml")).read()
+    with open(full_path("metadata.xml")) as fp:
+        idp_metadata = fp.read()
 
     saml_config = Config()
 
@@ -383,6 +385,14 @@ def test_load_local():
     }
     cfg = saml_config.load(config_dict)
     assert cfg
+
+
+def test_load_remote_encoding():
+    crypto = sigver._get_xmlsec_cryptobackend()
+    sc = sigver.SecurityContext(crypto, key_type="", cert_type="")
+    httpc = HTTPBase()
+    mds = MetaDataExtern(ATTRCONV, 'http://metadata.aai.switch.ch/metadata.aaitest.xml', sc, full_path('SWITCHaaiRootCA.crt.pem'), httpc)
+    mds.load()
 
 
 def test_load_string():

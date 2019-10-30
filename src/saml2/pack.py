@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-#
-
 """Contains classes and functions that are necessary to implement
 different bindings.
 
@@ -10,23 +6,25 @@ Bindings normally consists of three parts:
 - how to package the information
 - which protocol to use
 """
-from six.moves.urllib.parse import urlparse, urlencode
-import saml2
+
 import base64
-from saml2.s_utils import deflate_and_base64_encode
-from saml2.s_utils import Unsupported
+try:
+    import html
+except:
+    import cgi as html
+
 import logging
-from saml2.sigver import REQ_ORDER
-from saml2.sigver import RESP_ORDER
-from saml2.sigver import SIGNER_ALGS
-import six
+
+import saml2
+from saml2.s_utils import deflate_and_base64_encode
+from saml2.sigver import REQ_ORDER, RESP_ORDER
 from saml2.xmldsig import SIG_ALLOWED_ALG
 
-logger = logging.getLogger(__name__)
+import six
+from six.moves.urllib.parse import urlencode, urlparse
 
 try:
     from xml.etree import cElementTree as ElementTree
-
     if ElementTree.VERSION < '1.3.0':
         # cElementTree has no support for register_namespace
         # neither _namespace_map, thus we sacrify performance
@@ -39,12 +37,39 @@ except ImportError:
         from elementtree import ElementTree
 import defusedxml.ElementTree
 
+
+logger = logging.getLogger(__name__)
+
 NAMESPACE = "http://schemas.xmlsoap.org/soap/envelope/"
-FORM_SPEC = """<form method="post" action="%s">
-   <input type="hidden" name="%s" value="%s" />
-   <input type="hidden" name="RelayState" value="%s" />
-   <input type="submit" value="Submit" />
-</form>"""
+
+HTML_INPUT_ELEMENT_SPEC = '<input type="{type}" name="{name}" value="{val}"/>'
+
+HTML_FORM_SPEC = """<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body onload="document.forms[0].submit()">
+    <noscript>
+      <p>
+        <strong>Note:</strong>
+        Since your browser does not support JavaScript,
+        you must press the Continue button once to proceed.
+      </p>
+    </noscript>
+    <form action="{action}" method="post">
+      {saml_response_input}
+      {relay_state_input}
+      <noscript>
+        <input type="submit" value="Continue"/>
+      </noscript>
+    </form>
+  </body>
+</html>"""
+
+
+def _html_escape(payload):
+    return html.escape(payload, quote=True)
 
 
 def http_form_post_message(message, location, relay_state="",
@@ -58,8 +83,6 @@ def http_form_post_message(message, location, relay_state="",
     :param relay_state: for preserving and conveying state information
     :return: A tuple containing header information and a HTML message.
     """
-    response = ["<head>", """<title>SAML 2.0 POST</title>""", "</head><body>"]
-
     if not isinstance(message, six.string_types):
         message = str(message)
     if not isinstance(message, six.binary_type):
@@ -71,13 +94,22 @@ def http_form_post_message(message, location, relay_state="",
         _msg = message
     _msg = _msg.decode('ascii')
 
-    response.append(FORM_SPEC % (location, typ, _msg, relay_state))
+    saml_response_input = HTML_INPUT_ELEMENT_SPEC.format(
+            name=_html_escape(typ),
+            val=_html_escape(_msg),
+            type='hidden')
 
-    response.append("""<script type="text/javascript">""")
-    response.append("     window.onload = function ()")
-    response.append(" { document.forms[0].submit(); }")
-    response.append("""</script>""")
-    response.append("</body>")
+    relay_state_input = ""
+    if relay_state:
+        relay_state_input = HTML_INPUT_ELEMENT_SPEC.format(
+                name='RelayState',
+                val=_html_escape(relay_state),
+                type='hidden')
+
+    response = HTML_FORM_SPEC.format(
+        saml_response_input=saml_response_input,
+        relay_state_input=relay_state_input,
+        action=location)
 
     return {"headers": [("Content-type", "text/html")], "data": response}
 
@@ -247,7 +279,8 @@ def parse_soap_enveloped_saml(text, body_class, header_class=None):
         if part.tag == '{%s}Body' % NAMESPACE:
             for sub in part:
                 try:
-                    body = saml2.create_class_from_element_tree(body_class, sub)
+                    body = saml2.create_class_from_element_tree(
+                            body_class, sub)
                 except Exception:
                     raise Exception(
                         "Wrong body type (%s) in SOAP envelope" % sub.tag)

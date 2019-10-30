@@ -19,7 +19,7 @@ from saml2 import xmldsig as ds
 
 from saml2 import saml
 
-from py.test import raises
+from pytest import raises
 
 from saml2.saml import Issuer
 from saml2.saml import Attribute
@@ -43,13 +43,15 @@ class TestExtensionElement:
         print(ava)
         ee = saml2.ExtensionElement("")
 
-        raises(KeyError, "ee.loadd(ava)")
+        with raises(KeyError):
+            ee.loadd(ava)
 
         ava["tag"] = "foo"
         del ava["namespace"]
 
         ee = saml2.ExtensionElement("")
-        raises(KeyError, "ee.loadd(ava)")
+        with raises(KeyError):
+            ee.loadd(ava)
 
     def test_find_children(self):
         ava = {
@@ -211,8 +213,8 @@ class TestSAMLBase:
     def test_make_vals_multi_dict(self):
         ava = ["foo", "bar", "lions", "saints"]
 
-        raises(Exception,
-               "saml2.make_vals(ava, AttributeValue, Attribute(), part=True)")
+        with raises(Exception):
+            saml2.make_vals(ava, AttributeValue, Attribute(), part=True)
 
         attr = Attribute()
         saml2.make_vals(ava, AttributeValue, attr, prop="attribute_value")
@@ -230,18 +232,55 @@ class TestSAMLBase:
         assert "saml:AttributeValue" in nsstr
         assert "saml:AttributeValue" not in txt
 
-    def test_set_text(self):
-        av = AttributeValue()
-        av.set_text(True)
-        assert av.text == "true"
-        av.set_text(False)
-        assert av.text == "false"
-        # can't change value to another type
-        raises(AssertionError, "av.set_text(491)")
-
+    def test_set_text_empty(self):
         av = AttributeValue()
         av.set_text(None)
-        assert av.text == ""
+        assert av.get_type() == ''
+        assert av.text == ''
+
+    def test_set_text_value(self):
+        value = 123
+        av = AttributeValue(value)
+        assert av.get_type() == 'xs:integer'
+        assert av.text == str(value)
+
+    def test_set_text_update_same_type(self):
+        av = AttributeValue()
+        av.set_text(True)
+        assert av.get_type() == 'xs:boolean'
+        assert av.text == 'true'
+        av.set_text(False)
+        assert av.get_type() == 'xs:boolean'
+        assert av.text == 'false'
+
+    def test_set_text_cannot_change_value_type(self):
+        av = AttributeValue()
+        av.set_text(True)
+        assert av.get_type() == 'xs:boolean'
+        assert av.text == 'true'
+        with raises(ValueError):
+            av.set_text(123)
+        assert av.get_type() == 'xs:boolean'
+        assert av.text == 'true'
+
+    def test_set_xs_type_anytype_unchanged_value(self):
+        av = AttributeValue()
+        av.set_type('xs:anyType')
+        for value in [
+            [1, 2, 3],
+            {'key': 'value'},
+            True,
+            123,
+        ]:
+            av.set_text(value)
+            # the value is unchanged
+            assert av.text == value
+
+    def test_set_invalid_type_before_text(self):
+        av = AttributeValue()
+        av.set_type('invalid-type')
+        with raises(ValueError):
+            av.set_text('foobar')
 
     def test_make_vals_div(self):
         foo = saml2.make_vals(666, AttributeValue, part=True)
@@ -617,7 +656,7 @@ BASIC_BASE64_AV = """<?xml version="1.0" encoding="utf-8"?>
 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:basic"
 Name="FirstName">
-<AttributeValue 
+<AttributeValue
 xsi:type="xs:base64Binary">VU5JTkVUVA==</AttributeValue>
 </Attribute>"""
 
@@ -828,35 +867,61 @@ class TestSubjectConfirmation:
         self.sc.subject_confirmation_data = saml.subject_confirmation_data_from_string(
             saml2_data.TEST_SUBJECT_CONFIRMATION_DATA)
         new_sc = saml.subject_confirmation_from_string(self.sc.to_string())
-        assert new_sc.name_id.sp_provided_id == "sp provided id"
-        assert new_sc.method == saml.SCM_BEARER
-        assert new_sc.subject_confirmation_data.not_before == \
-               "2007-08-31T01:05:02Z"
-        assert new_sc.subject_confirmation_data.not_on_or_after == \
-               "2007-09-14T01:05:02Z"
-        assert new_sc.subject_confirmation_data.recipient == "recipient"
-        assert new_sc.subject_confirmation_data.in_response_to == "responseID"
-        assert new_sc.subject_confirmation_data.address == "127.0.0.1"
+        self._assertBearer(new_sc)
 
-    def testUsingTestData(self):
-        """Test subject_confirmation_from_string() using test data"""
-
+    def testBearerUsingTestData(self):
+        """Test subject_confirmation_from_string() using test data for 'bearer' SubjectConfirmation"""
         sc = saml.subject_confirmation_from_string(
             saml2_data.TEST_SUBJECT_CONFIRMATION)
+        assert sc.verify()
+        self._assertBearer(sc)
+
+    def _assertBearer(self, sc):
+        """Asserts SubjectConfirmation that has method 'bearer'"""
         assert sc.name_id.sp_provided_id == "sp provided id"
         assert sc.method == saml.SCM_BEARER
+        assert sc.subject_confirmation_data is not None
         assert sc.subject_confirmation_data.not_before == "2007-08-31T01:05:02Z"
         assert sc.subject_confirmation_data.not_on_or_after == "2007-09-14T01:05:02Z"
         assert sc.subject_confirmation_data.recipient == "recipient"
         assert sc.subject_confirmation_data.in_response_to == "responseID"
         assert sc.subject_confirmation_data.address == "127.0.0.1"
+        key_info = sc.subject_confirmation_data.extensions_as_elements(ds.KeyInfo.c_tag, ds)
+        assert len(key_info) == 0
 
-    def testVerify(self):
-        """Test SubjectConfirmation verify"""
+    def testHolderOfKeyUsingTestData(self):
+        """Test subject_confirmation_from_string() using test data for 'holder-of-key' SubjectConfirmation"""
 
         sc = saml.subject_confirmation_from_string(
-            saml2_data.TEST_SUBJECT_CONFIRMATION)
+            saml2_data.TEST_HOLDER_OF_KEY_SUBJECT_CONFIRMATION
+        )
         assert sc.verify()
+        assert sc.method == saml.SCM_HOLDER_OF_KEY
+        assert sc.subject_confirmation_data is not None
+        assert sc.subject_confirmation_data.not_on_or_after == "2007-09-14T01:05:02Z"
+        assert sc.subject_confirmation_data.recipient == "recipient"
+        assert sc.subject_confirmation_data.in_response_to == "responseID"
+
+        key_info = sc.subject_confirmation_data.extensions_as_elements(ds.KeyInfo.c_tag, ds)
+        assert len(key_info) == 1
+        assert len(key_info[0].x509_data) == 1
+
+        expected_cert = (
+            "MIICITCCAYoCAQEwDQYJKoZIhvcNAQELBQAwWDELMAkGA1UEBhMCenoxCzAJBgNV"
+            "BAgMAnp6MQ0wCwYDVQQHDAR6enp6MQ4wDAYDVQQKDAVaenp6ejEOMAwGA1UECwwF"
+            "Wnp6enoxDTALBgNVBAMMBHRlc3QwIBcNMTkwNDEyMTk1MDM0WhgPMzAxODA4MTMx"
+            "OTUwMzRaMFgxCzAJBgNVBAYTAnp6MQswCQYDVQQIDAJ6ejENMAsGA1UEBwwEenp6"
+            "ejEOMAwGA1UECgwFWnp6enoxDjAMBgNVBAsMBVp6enp6MQ0wCwYDVQQDDAR0ZXN0"
+            "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDHcj80WU/XBsd9FlyQmfjPUdfm"
+            "edhCFDd6TEQmZNNqP/UG+VkGa+BXjRIHMfic/WxPTbGhCjv68ci0UDNomUXagFex"
+            "LGNpkwa7+CRVtoc/1xgq+ySE6M4nhcCutScoxNvWNn5eSQ66i3U0sTv91MgsXxqE"
+            "dTaiZg0BIufEc3dueQIDAQABMA0GCSqGSIb3DQEBCwUAA4GBAGUV5B+USHvaRa8k"
+            "gCNJSuNpo6ARlv0ekrk8bbdNRBiEUdCMyoGJFfuM9K0zybX6Vr25wai3nvaog294"
+            "Vx/jWjX2g5SDbjItH6VGy6C9GCGf1A07VxFRCfJn5tA9HuJjPKiE+g/BmrV5N4Ce"
+            "alzFxPHWYkNOzoRU8qI7OqUai1kL"
+        )
+        xcert = key_info[0].x509_data[0].x509_certificate
+        assert xcert.text.strip().replace("\n", "") == expected_cert
 
 
 class TestSubject:

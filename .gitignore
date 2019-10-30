@@ -1,200 +1,195 @@
-*.pyc
-*.~
-\#*
-.*~
-.eggs
-*.egg
-*.egg-info
-example/*/*.log
-example/*.db
-example/*/*.db
+### Custom.gitignore
+
+example/*/*.subject
+example/*/*.xml
+example/*/*_conf.py
+example/*/modules/
+
+tests/*.log.*
 tests/*.db
-tests/*.log
+
+eptid
+
+
+### Python.gitignore
+### https://github.com/github/gitignore/blob/master/Python.gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
 build/
+develop-eggs/
 dist/
-example/sp/identities
-subject.db
-.idea
-.project
-.pydevproject
-.DS_store
-.gitignore
-debug_*
-*.log
-*.out
-tmp*
-*.tmp
-*.log.*
-*.db
-*egg-info*
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#
+# Usually these files are written by a python script from a template before
+# PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
 .coverage
-*.tmpl
-*.iml
-_build/
+.coverage.*
 .cache
-*.swp
-.tox
-env
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
 
-example/idp3/htdocs/login.mako
+# Translations
+*.mo
+*.pot
 
-example/idp3/idp.py
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
 
-example/idp3/idp.xml
+# Flask stuff:
+instance/
+.webassets-cache
 
-example/idp3/idp_conf.py
+# Scrapy stuff:
+.scrapy
 
-example/idp3/idp_err.xml
+# Sphinx documentation
+docs/_build/
 
-example/idp3/idp_user.py
+# PyBuilder
+target/
 
-example/idp3/metadata.xml
+# Jupyter Notebook
+.ipynb_checkpoints
 
-example/idp3/modules/login.mako.py
+# pyenv
+.python-version
 
-example/idp3/modules/root.mako.py
+# celery beat schedule file
+celerybeat-schedule
 
-example/idp3/pki/create_key.sh
+# SageMath parsed files
+*.sage.py
 
-example/idp3/pki/mycert.pem
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-example/idp3/pki/mykey.pem
+# Spyder project settings
+.spyderproject
+.spyproject
 
-example/idp3/templates/root.mako
+# Rope project settings
+.ropeproject
 
-example/sp2/attributemaps/basic.py
+# Visual Studio Code files
+.vscode/
 
-example/sp2/attributemaps/saml_uri.py
+# mkdocs documentation
+/site
 
-example/sp2/attributemaps/shibboleth_uri.py
+# mypy
+.mypy_cache/
 
-example/sp2/pki/mycert.pem
 
-example/sp2/pki/mykey.pem
+### Linux.gitignore
+### https://github.com/github/gitignore/blob/master/Global/Linux.gitignore
 
-example/sp2/sp.py
+*~
 
-example/sp2/sp.xml
+# temporary files which can be created if a process still has a handle open of a deleted file
+.fuse_hidden*
 
-example/sp2/sp_conf.py
+# KDE directory preferences
+.directory
 
-example/sp2/who.ini
+# Linux trash folder which might appear on any partition or disk
+.Trash-*
 
-example/idp2/idp.xml
+# .nfs files are created when an open file is removed but is still being accessed
+.nfs*
 
-example/idp2/idp_conf_test.py
 
-example/idp2/metadata.xml
+### masOS.gitignore
+### https://github.com/github/gitignore/blob/master/Global/macOS.gitignore
 
-example/idp2/modules/login.mako.py
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
 
-example/idp2/modules/root.mako.py
+# Icon must end with two \r
+Icon
 
-example/idp3/idp_conf_test.py
+# Thumbnails
+._*
 
-update
-
-src/saml2/entity_category/swamid2.py
-
-example/idp2/IdpTestConf.py
-
-example/idp2/create_idp_conf.json
-
-example/idp2/create_idp_conf.py
-
-example/idp2/idpSaml2test.xml
-
-example/idp2/idp_conf.template
-
-example/idp2/idp_conf_saml2test.py
-
-example/sp/sp.xml
-
-example/idp2/idp_conf_local.py
-
-example/sp/sp_conf_local.py
-
-example/sp/my_backup_sp_conf_local.py
-
-example/sp/backup_sp_conf_local.py
-
-example/idp2/pki/localhost.ca.crt
-
-example/idp2/pki/localhost.ca.crt
-
-example/idp2/pki/localhost.ca.key
-
-example/idp2/pki/localhost.ca.key
-
-example/sp/pki/localhost.ca.crt
-
-example/sp/pki/localhost.ca.crt
-
-example/sp/pki/localhost.ca.key
-
-example/sp/pki/localhost.ca.key
-
-example/idp2/idp_conf_dirgweb.py
-
-example/idp2/idp_conf_nocert.py
-
-example/idp2/idp_conf_proxy.py
-
-example/idp2/idp_nocert.xml
-
-example/sp/nocert_sp_conf/sp_nocert.xml
-
-example/sp/normal_sp_conf/sp.xml
-
-example/sp/normal_sp_conf/sp_conf.py
-
-example/sp/normal_sp_conf/who.ini
-
-example/sp/sp_nocert.xml
-
-example/sp/sp_nocert2.xml
-
-example/sp/test.py
-
-example/sp/sp_conf.py
-
-example/sp/nocert_sp_conf/sp.xml
-
-example/sp/nocert_sp_conf/sp_conf.py
-
-example/sp/nocert_sp_conf/who.ini
-
-example/sp-repoze/my_sp.xml
-
-example/sp-repoze/pki/localhost.ca.crt
-
-example/sp-repoze/pki/localhost.ca.key
-
-example/sp-repoze/sp.xml
-
-example/sp-repoze/sp.xml
-
-example/sp-repoze/sp_conf.py
-
-example/sp-repoze/sp_conf.py
-
-example/idp2/sp_test.xml
-
-example/sp-repoze/idp_test.xml
-
-example/sp-repoze/sp_conf_example.py
-
-example/idp2/idp_conf_example.py
-
-example/idp2/lidp.xml
-
-example/idp2/old_idp.xml
-
-example/sp-repoze/old_sp.xml
-
-example/sp-repoze/sp_conf_2.Pygmalion
-
-example/sp-repoze/sp_conf_2.py
-
-sp.xml
-tests/pki/qwerty.*
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+
+### Vim.gitignore
+### https://github.com/github/gitignore/blob/master/Global/Vim.gitignore
+
+# Swap
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Session
+Session.vim
+
+# Temporary
+.netrwhist
+*~
+# Auto-generated tag files
+tags
+# Persistent undo
+[._]*.un~
